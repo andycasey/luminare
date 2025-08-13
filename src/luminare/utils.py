@@ -1,5 +1,5 @@
-
 import re
+
 
 def parse_marcs_photosphere_path(filename: str) -> dict:
     """
@@ -22,24 +22,24 @@ def parse_marcs_photosphere_path(filename: str) -> dict:
     # The patterns look for the prefix (p, g, z, a, c) followed by a sign and a number.
     # The '?' makes the sign optional for numbers that might not have it (though your examples do).
     # The '.*?' is a non-greedy match for any characters in between.
-    teff_pattern = r'[p|s](\d+)'
-    logg_pattern = r'g([+-]?\d+\.?\d*)'
-    metallicity_pattern = r'_z([+-]?\d+\.?\d*)' # Matches the metallicity after the 'z'
-    alpha_pattern = r'_a([+-]?\d+\.?\d*)'
-    carbon_pattern = r'_c([+-]?\d+\.?\d*)'
-    vmic_pattern = r'_t(\d+)'
+    teff_pattern = r"[p|s](\d+)"
+    logg_pattern = r"g([+-]?\d+\.?\d*)"
+    metallicity_pattern = r"_z([+-]?\d+\.?\d*)"  # Matches the metallicity after the 'z'
+    alpha_pattern = r"_a([+-]?\d+\.?\d*)"
+    carbon_pattern = r"_c([+-]?\d+\.?\d*)"
+    vmic_pattern = r"_t(\d+)"
 
     parameters = {}
-    parameters['vmic'] = float(re.search(vmic_pattern, filename).group(1))
+    parameters["vmic"] = float(re.search(vmic_pattern, filename).group(1))
 
     # Extract effective temperature (pXXXX)
     teff_match = re.search(teff_pattern, filename)
-    parameters['Teff'] = int(teff_match.group(1))
+    parameters["Teff"] = int(teff_match.group(1))
 
     # Extract surface gravity (g+X.X)
     logg_match = re.search(logg_pattern, filename)
-    parameters['logg'] = float(logg_match.group(1))
- 
+    parameters["logg"] = float(logg_match.group(1))
+
     # Extract metallicity (z+X.XX)
     # Note: There are two 'z' parameters in your example. The one we want for overall metallicity
     # seems to be the first one after 'mod_'.
@@ -57,14 +57,14 @@ def parse_marcs_photosphere_path(filename: str) -> dict:
     # If the user meant the first `z+0.00` (mod_z+0.00), the regex would need adjustment.
     # Given the example `_z+0.00_a-0.25`, it's likely the one after `_x3_`.
     metallicity_match = re.search(metallicity_pattern, filename)
-    parameters['m_H'] = float(metallicity_match.group(1))
+    parameters["m_H"] = float(metallicity_match.group(1))
 
     # Extract [alpha/metallicity] (a+X.XX)
     alpha_match = re.search(alpha_pattern, filename)
-    parameters['alpha_m'] = float(alpha_match.group(1))
+    parameters["alpha_m"] = float(alpha_match.group(1))
 
     # Extract [carbon/metallicity] (c+X.XX)
     carbon_match = re.search(carbon_pattern, filename)
-    parameters['C_m'] = float(carbon_match.group(1))
+    parameters["C_m"] = float(carbon_match.group(1))
 
     return parameters

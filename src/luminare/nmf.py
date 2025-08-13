@@ -2,21 +2,78 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from tqdm import tqdm
+from typing import Tuple, List, Optional
+
 
 @jax.jit
-def loss(W, H, V):
+def loss(W: jnp.ndarray, H: jnp.ndarray, V: jnp.ndarray) -> float:
+    """
+    Compute the Frobenius norm loss for NMF: ||WH - V||_F^2 / n_samples.
+
+    Args:
+        W: Factor matrix of shape (n_samples, n_components)
+        H: Factor matrix of shape (n_components, n_features)
+        V: Data matrix of shape (n_samples, n_features)
+
+    Returns:
+        Mean squared reconstruction error
+    """
     return jnp.sum(jnp.square(W @ H - V)) / V.shape[0]
 
+
 @jax.jit
-def max_abs_diff(W, H, V):
+def max_abs_diff(W: jnp.ndarray, H: jnp.ndarray, V: jnp.ndarray) -> float:
+    """
+    Compute the maximum absolute reconstruction error.
+
+    Args:
+        W: Factor matrix of shape (n_samples, n_components)
+        H: Factor matrix of shape (n_components, n_features)
+        V: Data matrix of shape (n_samples, n_features)
+
+    Returns:
+        Maximum absolute difference between WH and V
+    """
     return jnp.max(jnp.abs(W @ H - V))
 
+
 @jax.jit
-def mean_abs_diff(W, H, V):
+def mean_abs_diff(W: jnp.ndarray, H: jnp.ndarray, V: jnp.ndarray) -> float:
+    """
+    Compute the mean absolute reconstruction error.
+
+    Args:
+        W: Factor matrix of shape (n_samples, n_components)
+        H: Factor matrix of shape (n_components, n_features)
+        V: Data matrix of shape (n_samples, n_features)
+
+    Returns:
+        Mean absolute difference between WH and V
+    """
     return jnp.mean(jnp.abs(W @ H - V))
 
-@partial(jax.jit, donate_argnums=(0,), static_argnames=("iterations", ))
-def nmf_multiplicative_update_H(H, W, V, iterations, epsilon):
+
+@partial(jax.jit, donate_argnums=(0,), static_argnames=("iterations",))
+def nmf_multiplicative_update_H(
+    H: jnp.ndarray, W: jnp.ndarray, V: jnp.ndarray, iterations: int, epsilon: float
+) -> jnp.ndarray:
+    """
+    Perform multiple multiplicative updates on H matrix using JAX scan.
+
+    This function updates H for a fixed number of iterations while keeping W constant.
+    Uses the multiplicative update rule: H := H * (W.T @ V) / (W.T @ W @ H + epsilon)
+
+    Args:
+        H: Factor matrix to update, shape (n_components, n_features)
+        W: Fixed factor matrix, shape (n_samples, n_components)
+        V: Data matrix, shape (n_samples, n_features)
+        iterations: Number of update steps to perform
+        epsilon: Small value to prevent division by zero
+
+    Returns:
+        Updated H matrix of the same shape
+    """
+
     def f(carry, x):
         H = carry
 
@@ -26,12 +83,51 @@ def nmf_multiplicative_update_H(H, W, V, iterations, epsilon):
     H_new, _ = jax.lax.scan(f, H, None, length=iterations)
     return H_new
 
+
 @jax.jit
-def update_H(W, H, V, epsilon):
+def update_H(
+    W: jnp.ndarray, H: jnp.ndarray, V: jnp.ndarray, epsilon: float
+) -> jnp.ndarray:
+    """
+    Perform a single multiplicative update step on H matrix.
+
+    Args:
+        W: Factor matrix, shape (n_samples, n_components)
+        H: Factor matrix to update, shape (n_components, n_features)
+        V: Data matrix, shape (n_samples, n_features)
+        epsilon: Small value to prevent division by zero
+
+    Returns:
+        Updated H matrix of the same shape
+    """
     return jnp.clip(H * ((W.T @ V) / (W.T @ W @ H + epsilon)), epsilon, None)
 
-@partial(jax.jit, static_argnums=(3,)) # iterations should be static for scan to unroll
-def _multiplicative_update_WH(W, H, V, iterations, epsilon=1e-12):
+
+@partial(jax.jit, static_argnums=(3,))  # iterations should be static for scan to unroll
+def _multiplicative_update_WH(
+    W: jnp.ndarray,
+    H: jnp.ndarray,
+    V: jnp.ndarray,
+    iterations: int,
+    epsilon: float = 1e-12,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Perform multiple alternating multiplicative updates on both W and H matrices.
+
+    This internal function performs the core NMF multiplicative update algorithm,
+    alternating between updating H and W for the specified number of iterations.
+
+    Args:
+        W: Factor matrix, shape (n_samples, n_components)
+        H: Factor matrix, shape (n_components, n_features)
+        V: Data matrix, shape (n_samples, n_features)
+        iterations: Number of update cycles to perform
+        epsilon: Small value to prevent division by zero
+
+    Returns:
+        Tuple of (updated_W, updated_H)
+    """
+
     def f(carry, x):
         # carry is (W, H) from the previous iteration
         W, H = carry
@@ -42,7 +138,35 @@ def _multiplicative_update_WH(W, H, V, iterations, epsilon=1e-12):
     (W, H), _ = jax.lax.scan(f, (W, H), None, length=iterations)
     return (W, H)
 
-def multiplicative_updates_H(V, W, H, iterations=10_000, verbose_frequency=0, epsilon=1e-12):
+
+def multiplicative_updates_H(
+    V: jnp.ndarray,
+    W: jnp.ndarray,
+    H: jnp.ndarray,
+    iterations: int = 10_000,
+    verbose_frequency: int = 0,
+    epsilon: float = 1e-12,
+) -> Tuple[jnp.ndarray, List[Tuple[int, float, float, float]]]:
+    """
+    Perform NMF multiplicative updates on H matrix only (W is fixed).
+
+    This function optimizes H while keeping W constant, useful for the
+    "Minimize C(H|W,V)" step in alternating optimization schemes.
+
+    Args:
+        V: Data matrix to factorize, shape (n_samples, n_features)
+        W: Fixed factor matrix, shape (n_samples, n_components)
+        H: Initial factor matrix to optimize, shape (n_components, n_features)
+        iterations: Total number of update iterations
+        verbose_frequency: How often to print progress (0 = no progress output)
+        epsilon: Small value to prevent division by zero
+
+    Returns:
+        Tuple of:
+        - Updated H matrix of shape (n_components, n_features)
+        - List of loss tracking tuples, each containing:
+          (iteration, loss_value, max_abs_diff, mean_abs_diff)
+    """
 
     if verbose_frequency == 0:
         epochs, n_steps_per_epoch = (1, iterations)
@@ -50,22 +174,74 @@ def multiplicative_updates_H(V, W, H, iterations=10_000, verbose_frequency=0, ep
         epochs, n_steps_per_epoch = (iterations // verbose_frequency, verbose_frequency)
 
     desc = "Minimising C(H|W,V)"
-    losses = (_, last_loss, *_) = [0, loss(W, H, V), max_abs_diff(W, H, V), mean_abs_diff(W, H, V)]
+    losses = (_, last_loss, *_) = [
+        0,
+        loss(W, H, V),
+        max_abs_diff(W, H, V),
+        mean_abs_diff(W, H, V),
+    ]
     with tqdm(total=iterations, desc=f"{desc}: loss={last_loss}") as pb:
         for epoch in range(1, 1 + epochs):
             H = nmf_multiplicative_update_H(H, W, V, n_steps_per_epoch, epsilon=epsilon)
 
-            this_loss, this_max_abs_diff, this_mean_abs_diff = (loss(W, H, V), max_abs_diff(W, H, V), mean_abs_diff(W, H, V))
-            losses.append((n_steps_per_epoch * epoch, this_loss, this_max_abs_diff, this_mean_abs_diff))
-            pb.set_description(f"{desc}: loss={this_loss:.2e} ({this_loss - last_loss:+.2e}); max_abs_diff={this_max_abs_diff:.2f}; mean_abs_diff={this_mean_abs_diff:.2e}")
+            this_loss, this_max_abs_diff, this_mean_abs_diff = (
+                loss(W, H, V),
+                max_abs_diff(W, H, V),
+                mean_abs_diff(W, H, V),
+            )
+            losses.append(
+                (
+                    n_steps_per_epoch * epoch,
+                    this_loss,
+                    this_max_abs_diff,
+                    this_mean_abs_diff,
+                )
+            )
+            pb.set_description(
+                f"{desc}: loss={this_loss:.2e} ({this_loss - last_loss:+.2e}); max_abs_diff={this_max_abs_diff:.2f}; mean_abs_diff={this_mean_abs_diff:.2e}"
+            )
             last_loss = this_loss
             pb.update(n_steps_per_epoch)
-    
+
     return (H, losses)
 
 
+def multiplicative_updates_WH(
+    V: jnp.ndarray,
+    W: jnp.ndarray,
+    H: jnp.ndarray,
+    iterations: int = 10_000,
+    verbose_frequency: int = 0,
+    epsilon: float = 1e-12,
+) -> Tuple[jnp.ndarray, jnp.ndarray, List[Tuple[int, float, float, float]]]:
+    """
+    Perform multiplicative updates for NMF on both W and H matrices.
 
-def multiplicative_updates_WH(V, W, H, iterations=10_000, verbose_frequency=0, epsilon=1e-12):
+    This function implements the standard NMF multiplicative update algorithm,
+    alternating between updating H and W to minimize ||WH - V||_F^2.
+
+    Args:
+        V: Data matrix to factorize, shape (n_samples, n_features)
+        W: Initial factor matrix, shape (n_samples, n_components)
+        H: Initial factor matrix, shape (n_components, n_features)
+        iterations: Total number of update iterations to perform
+        verbose_frequency: How often to print progress (0 = no progress output)
+        epsilon: Small value to prevent division by zero and ensure non-negativity
+
+    Returns:
+        Tuple of:
+        - Updated W matrix of shape (n_samples, n_components)
+        - Updated H matrix of shape (n_components, n_features)
+        - List of loss tracking tuples, each containing:
+          (iteration, loss_value, max_abs_diff, mean_abs_diff)
+
+    Note:
+        The multiplicative update rules used are:
+        - H := H * (W.T @ V) / (W.T @ W @ H + epsilon)
+        - W := W * (V @ H.T) / (W @ H @ H.T + epsilon)
+
+        Both matrices are clipped to ensure non-negativity with minimum value epsilon.
+    """
 
     if verbose_frequency == 0:
         epochs, n_steps_per_epoch = (1, iterations)
@@ -73,167 +249,35 @@ def multiplicative_updates_WH(V, W, H, iterations=10_000, verbose_frequency=0, e
         epochs, n_steps_per_epoch = (iterations // verbose_frequency, verbose_frequency)
 
     desc = "Minimising C(W,H|V)"
-    losses = (_, last_loss, *_) = [0, loss(W, H, V), max_abs_diff(W, H, V), mean_abs_diff(W, H, V)]
+    losses = (_, last_loss, *_) = [
+        0,
+        loss(W, H, V),
+        max_abs_diff(W, H, V),
+        mean_abs_diff(W, H, V),
+    ]
     with tqdm(total=iterations, desc=f"{desc}: loss={last_loss}") as pb:
         for epoch in range(1, 1 + epochs):
-            W, H = _multiplicative_update_WH(W, H, V, n_steps_per_epoch, epsilon=epsilon)
+            W, H = _multiplicative_update_WH(
+                W, H, V, n_steps_per_epoch, epsilon=epsilon
+            )
 
-            this_loss, this_max_abs_diff, this_mean_abs_diff = (loss(W, H, V), max_abs_diff(W, H, V), mean_abs_diff(W, H, V))
-            losses.append((n_steps_per_epoch * epoch, this_loss, this_max_abs_diff, this_mean_abs_diff))
-            pb.set_description(f"{desc}: loss={this_loss:.2e} ({this_loss - last_loss:+.2e}); max_abs_diff={this_max_abs_diff:.2f}; mean_abs_diff={this_mean_abs_diff:.2e}")
+            this_loss, this_max_abs_diff, this_mean_abs_diff = (
+                loss(W, H, V),
+                max_abs_diff(W, H, V),
+                mean_abs_diff(W, H, V),
+            )
+            losses.append(
+                (
+                    n_steps_per_epoch * epoch,
+                    this_loss,
+                    this_max_abs_diff,
+                    this_mean_abs_diff,
+                )
+            )
+            pb.set_description(
+                f"{desc}: loss={this_loss:.2e} ({this_loss - last_loss:+.2e}); max_abs_diff={this_max_abs_diff:.2f}; mean_abs_diff={this_mean_abs_diff:.2e}"
+            )
             last_loss = this_loss
             pb.update(n_steps_per_epoch)
-    
+
     return (W, H, losses)
-
-
-
-
-@partial(jax.jit, static_argnames=("epsilon", ))
-def basis_weights(A, X, epsilon=1e-12):
-    return jnp.clip(A @ X, epsilon, None)
-    
-@jax.jit
-def residual(W, H, V):
-    return (W @ H - V)
-
-
-# Define the loss function
-@partial(jax.jit, static_argnames=("epsilon", "penalty"))
-def loss_X(X, A, H, V, epsilon=1e-12, penalty=0.0):
-    W = A @ X
-    # Count elements of W that are negative
-    non_negative_penalty = jnp.sum(penalty * jnp.where(W < 0, 1, 0) * -W)
-    W = jnp.clip(W, epsilon, None)
-    #W = jnp.abs(W)
-    return jnp.sum(jnp.square(residual(W, H, V))) + non_negative_penalty
-
-grad_loss_X = jax.grad(loss_X, argnums=0)
-
-@partial(jax.jit, donate_argnums=(1, 2, 3), static_argnums=(5, 6, 7, 8)) # iterations should be static for scan to unroll
-def _update_XH(A, X, W, H, V, iterations, learning_rate, epsilon=1e-12, penalty=0.0):
-
-    def f(carry, x):
-        # carry is (X, H, W) from the previous iteration
-        X, H, W = carry
-        X -= learning_rate * grad_loss_X(X, A, H, V, epsilon, penalty)
-        W = basis_weights(A, X, epsilon)
-        H = jnp.clip(H * ((W.T @ V) / (W.T @ W @ H + epsilon)), epsilon, None)
-        return ((X, H, W), None)
-
-    (X, H, W), _ = jax.lax.scan(f, (X, H, W), None, length=iterations)
-    return (X, H, W)    
-
-def update_XH(A, X, W, H, V, iterations, verbose_frequency=0, learning_rate=1e-8, epsilon=1e-12, penalty=0.0):        
-    desc = "Minimising C(X,H|A,V)"
-    last_loss = loss(basis_weights(A, X, epsilon), H, V)
-    if verbose_frequency == 0:
-        epochs, n_steps_per_epoch = (1, iterations)
-    else:
-        epochs, n_steps_per_epoch = (iterations // verbose_frequency, verbose_frequency)
-
-    with tqdm(total=iterations, desc=f"{desc}: loss={last_loss:.2e}") as pb:
-        for epoch in range(epochs):
-            X, H, W = _update_XH(A, X, W, H, V, n_steps_per_epoch, learning_rate, epsilon=epsilon, penalty=penalty)
-            this_loss = loss(W, H, V)
-            pb.set_description(f"{desc}: loss={this_loss:.2e} ({this_loss - last_loss:+.2e}), min(AX)={jnp.min(A @ X):.2e} max_abs_diff={max_abs_diff(W, H, V):.2f}, mean_abs_diff={mean_abs_diff(W, H, V):.2e}")
-            last_loss = this_loss
-            pb.update(n_steps_per_epoch)
-    
-    return (X, H, W, [])
-
-
-@partial(jax.jit, static_argnames=("epsilon", "penalty"))
-def loss_batched(X, x, H, V, f_modes, epsilon=1e-12, penalty=0.0):
-    W = fourier_matvec(x.T, f_modes) @ X
-    # Count elements of W that are negative
-    non_negative_penalty = jnp.sum(penalty * jnp.where(W < 0, 1, 0) * -W)
-    W = jnp.clip(W, epsilon, None)
-    #W = jnp.abs(W)
-    return jnp.sum(jnp.square(residual(W, H, V))) + non_negative_penalty
-
-grad_loss_batched = jax.grad(loss_batched, argnums=0)
-
-@partial(jax.jit, donate_argnums=(1, 2, 3), static_argnums=(6, 7, 8, 9)) # iterations should be static for scan to unroll
-def _update_XH_batched(x, X, W, H, V, f_modes, iterations, learning_rate, epsilon=1e-12, penalty=0.0):
-
-    def f(carry, x):
-        # carry is (X, H, W) from the previous iteration
-        X, H, W = carry
-        X -= learning_rate * grad_loss_batched(X, x, H, V, f_modes, epsilon, penalty)
-        W = jnp.clip(fourier_matvec(x.T, f_modes) @ X, epsilon, None)
-        H = jnp.clip(H * ((W.T @ V) / (W.T @ W @ H + epsilon)), epsilon, None)
-        return ((X, H, W), None)
-
-    (X, H, W), _ = jax.lax.scan(f, (X, H, W), None, length=iterations)
-    return (X, H, W)    
-
-@jax.jit
-def fourier_matvec(x, f_modes):
-    A_complex = jnp.exp(f_modes @ x).T
-
-    s = A_complex.shape[1] // 2 + 1
-    #real_parts = 0.5 * jnp.real(A_complex[:, :s] + A_complex[:, s:])
-    real_parts = jnp.real(A_complex[:, :s])
-    imag_parts = -jnp.imag(A_complex[:, s:])
-
-    # Concatenate these two parts horizontally to form the final real-valued design matrix.
-    return jnp.concatenate([real_parts, imag_parts], axis=1)
-
-
-def update_XH_batched(x, X, W, H, V, f_modes, iterations, verbose_frequency=0, learning_rate=1e-8, epsilon=1e-12, penalty=0.0):        
-    desc = "Minimising C(X,H|A,V)"
-    last_loss = jnp.sum(jnp.square(fourier_matvec(x.T, f_modes) @ X @ H - V))
-
-    if verbose_frequency == 0:
-        epochs, n_steps_per_epoch = (1, iterations)
-    else:
-        epochs, n_steps_per_epoch = (iterations // verbose_frequency, verbose_frequency)
-
-    with tqdm(total=iterations, desc=f"{desc}: loss={last_loss:.2e}") as pb:
-        for epoch in range(epochs):
-            X, H, W = _update_XH_batched(x, X, W, H, V, f_modes, n_steps_per_epoch, learning_rate, epsilon=epsilon, penalty=penalty)
-            this_loss = loss(W, H, V)
-            pb.set_description(f"{desc}: loss={this_loss:.2e} ({this_loss - last_loss:+.2e}), min(AX)={jnp.min(A @ X):.2e} max_abs_diff={max_abs_diff(W, H, V):.2f}, mean_abs_diff={mean_abs_diff(W, H, V):.2e}")
-            last_loss = this_loss
-            pb.update(n_steps_per_epoch)
-    
-    return (X, H, W, [])
-
-
-def basis_weights_AsXs(As, Xs):
-    result = As[0] @ Xs[0]
-    for A, X in zip(As[1:], Xs[1:]):
-        result = jnp.concatenate([result, A @ X], axis=1)
-    return result#, epsilon, None)
-
-
-@jax.jit
-def loss_Xs_H(Xs, As, H, V, epsilon, penalty):
-
-    W = basis_weights_AsXs(As, Xs)
-    # Count elements of W that are negative
-    non_negative_penalty = jnp.sum(penalty * jnp.where(W < 0, 1, 0) * -W)
-    W = jnp.clip(W, epsilon, None)
-    #W = jnp.abs(W)
-    return jnp.sum(jnp.square(W @ H - V)) + non_negative_penalty
-
-
-grad_loss_Xs_H = jax.grad(loss_Xs_H, argnums=0)
-
-@partial(jax.jit, static_argnames=("iterations", "learning_rate", "epsilon", "penalty"))
-def update_Xs_H(As, Xs, H, V, iterations, learning_rate, epsilon, penalty):
-    def f(carry, x):
-        *Xs, H = carry
-        grad = grad_loss_Xs_H(Xs, As, H, V, epsilon, penalty)
-        new_Xs = []        
-        for X, g in zip(Xs, grad):
-            #assert jnp.isfinite(g).all()
-            new_Xs.append(X - learning_rate * g)
-        W = jnp.clip(basis_weights_AsXs(As, new_Xs), epsilon, None)
-
-        H_new = jnp.clip(H * ((W.T @ V) / (W.T @ W @ H + epsilon)), epsilon, None)
-        return ((*new_Xs, H), None)
-
-    (*Xs, H), _ = jax.lax.scan(f, (*Xs, H), None, length=iterations)
-    return (Xs, H)
