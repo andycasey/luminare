@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "luminare"
+version = "0.1.0"
+description = "A brief description of your package"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Andy Casey", email = "andycasey@gmail.com"}
+]
+maintainers = [
+    {name = "Andy Casey", email = "andycasey@gmail.com"}
+]
+keywords = ["keyword1", "keyword2", "keyword3"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.25.0",
+    # Add your package dependencies here
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.0",
+    "black>=21.0",
+    "flake8>=3.8",
+    "mypy>=0.900"
+]
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/andycasey/luminare"
+Repository = "https://github.com/andycasey/luminare"
+Documentation = "https://luminare.readthedocs.io"
+"Bug Reports" = "https://github.com/andycasey/luminare/issues"
+Changelog = "https://github.com/andycasey/luminare/blob/main/CHANGELOG.md"
+
+[project.scripts]
+# Uncomment and modify if your package provides command-line scripts
+# your-cli-command = "your_package.module:main_function"
+
+[project.entry-points."console_scripts"]
+# Alternative way to define console scripts
+# your-cli-command = "your_package.module:main_function"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["luminare*"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+# Optional: Configuration for development tools
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError"
+]
