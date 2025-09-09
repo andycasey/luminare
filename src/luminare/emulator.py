@@ -18,6 +18,7 @@ def create_stellar_spectrum_model(
     min_stellar_labels: Optional[jnp.array],
     max_stellar_labels: Optional[jnp.array],
     n_stellar_label_points: Optional[jnp.array],
+    λ_model: Optional[jnp.array] = None,    
     spectral_resolution: Optional[float] = None,
     max_vsini: Optional[float] = 200.0,
     continuum_regions: Optional[Tuple[float, float]] = None,
@@ -42,7 +43,7 @@ def create_stellar_spectrum_model(
         p = len(λ)
         if p % 2 > 0:
             # TODO: fix this hack
-            flux_model = lambda θ: jnp.hstack([
+            _flux_model = lambda θ: jnp.hstack([
                 convolved_flux(
                     rectified_flux_model(θ[:-1])[:-1], 
                     θ[-1],
@@ -52,7 +53,7 @@ def create_stellar_spectrum_model(
                 1.0
             ])
         else:
-            flux_model = lambda θ: convolved_flux(
+            _flux_model = lambda θ: convolved_flux(
                 rectified_flux_model(θ[:-1]), 
                 θ[-1], 
                 velocity_grid,
@@ -61,8 +62,15 @@ def create_stellar_spectrum_model(
         n_flux_model_parameters += 1
         stellar_label_names = (*stellar_label_names, "vsini") 
     else:
-        flux_model = rectified_flux_model
+        _flux_model = rectified_flux_model
 
+    if λ_model is not None:
+        # Need to interpolate from λ_model to λ
+        def flux_model(θ):            
+            return jnp.interp(λ, λ_model, _flux_model(θ))
+    else:
+        flux_model = _flux_model
+        
     forward_model = lambda θ: (
         flux_model(θ[:n_flux_model_parameters])
     *   continuum_model(θ[n_flux_model_parameters:])
