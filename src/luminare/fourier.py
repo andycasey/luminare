@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from functools import reduce
+from functools import reduce, partial
 from typing import List, Tuple
 import numpy as np
 
@@ -327,6 +327,56 @@ def gram_diagonal(
 
     return gram_diagonal_nd
 
+@partial(jax.jit, static_argnums=(0, 1))
+def gram_diagonal_no_mask(
+    samples_per_dim: List[int], modes_per_dim: List[int]
+) -> jnp.ndarray:
+    """
+    Compute the diagonal of A.T @ A where A is an N-dimensional Fourier design matrix.
+
+    Uses the fact that for separable bases, the Gram matrix diagonal is the
+    Kronecker product of 1D Gram matrix diagonals.
+
+    Args:
+        samples_per_dim: number of samples in each dimension
+        modes_per_dim: number of Fourier modes in each dimension
+
+    Returns:
+        diagonal vector, shape (prod(modes_per_dim),)
+    """
+
+    n_dims = len(samples_per_dim)
+
+    # Compute 1D Gram matrix diagonals for each dimension
+    gram_diagonals_1d = []
+
+    for dim in range(n_dims):
+        n_samples = samples_per_dim[dim]
+        n_modes = modes_per_dim[dim]
+
+        # Create coordinate array for this dimension
+        coord = jnp.linspace(0, 2 * jnp.pi, n_samples, endpoint=False)
+
+        # Get modes for this dimension
+        modes = create_1d_fourier_modes(n_samples, n_modes)
+
+        # Compute 1D basis matrix
+        basis_1d = evaluate_1d_fourier_basis(coord, modes)  # (n_samples, n_modes)
+
+        # Compute diagonal of 1D Gram matrix
+        gram_diag_1d = jnp.sum(basis_1d * basis_1d, axis=0)  # (n_modes,)
+        gram_diagonals_1d.append(gram_diag_1d)
+
+    # The N-D Gram matrix diagonal is the Kronecker product of 1D diagonals
+    # For diagonals, Kronecker product becomes outer products
+    gram_diagonal_nd = gram_diagonals_1d[0]
+
+    for dim in range(1, n_dims):
+        # Compute outer product with next dimension
+        gram_diagonal_nd = jnp.outer(gram_diagonal_nd, gram_diagonals_1d[dim])
+        gram_diagonal_nd = gram_diagonal_nd.flatten()
+
+    return gram_diagonal_nd
 
 def matdiag(
     samples_per_dim: List[int], modes_per_dim: List[int], diagonal_elements: jnp.ndarray
