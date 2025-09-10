@@ -8,6 +8,7 @@ from exojax.utils.grids import velocity_grid as _velocity_grid
 from luminare.continuum import create_design_matrix
 from luminare.fourier import eval_at_point
 from luminare.scalers import periodic_scalers
+from luminare.utils import air_to_vacuum
 
 def create_stellar_spectrum_model(
     λ: jnp.array,
@@ -23,6 +24,7 @@ def create_stellar_spectrum_model(
     max_vsini: Optional[float] = 200.0,
     continuum_regions: Optional[Tuple[float, float]] = None,
     continuum_n_modes: Optional[int] = None,
+    model_in_air_wavelengths: bool = False,
     **kwargs
 ):  
     λ = jnp.array(λ)
@@ -64,6 +66,12 @@ def create_stellar_spectrum_model(
     else:
         _flux_model = rectified_flux_model
 
+    if model_in_air_wavelengths:
+        if λ_model is not None:
+            λ_model = air_to_vacuum(λ_model)
+        else:
+            λ_model = air_to_vacuum(λ)
+
     if λ_model is not None:
         # Need to interpolate from λ_model to λ
         def flux_model(θ):            
@@ -71,10 +79,10 @@ def create_stellar_spectrum_model(
     else:
         flux_model = _flux_model
         
-    forward_model = lambda θ: (
+    forward_model = jax.jit(lambda θ: (
         flux_model(θ[:n_flux_model_parameters])
     *   continuum_model(θ[n_flux_model_parameters:])
-    )
+    ))
 
     transform_stellar_labels, inverse_transform_stellar_labels = periodic_scalers(
         *map(
@@ -90,6 +98,7 @@ def create_stellar_spectrum_model(
     transform = lambda x: jnp.hstack([transform_stellar_labels(x[:n]), x[n:]])
     inverse_transform = lambda x: jnp.hstack([inverse_transform_stellar_labels(x[:n]), x[n:]])
     n_parameters = n_flux_model_parameters + n_continuum_model_parameters
+
     return (forward_model, n_parameters, stellar_label_names, transform, inverse_transform)
     
 

@@ -1,5 +1,24 @@
 import re
 
+def air_to_vacuum(λ):
+    """
+    Convert wavelengths from air to vacuum.
+
+    Parameters:
+    -----------
+    λ : np.array
+        Wavelengths in Angstroms.
+
+    Returns:
+    --------
+    np.array
+        Wavelengths converted to vacuum in Angstroms.
+    """
+
+    s = 1e4 / λ  # Convert to micrometers
+    n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s**2) + \
+        0.0001599740894897 / (38.92568793293 - s**2)
+    return λ * n
 
 def parse_marcs_photosphere_path(filename: str) -> dict:
     """
