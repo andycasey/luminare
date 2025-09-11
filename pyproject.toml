@@ -21,17 +21,19 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 dependencies = [
-    "requests>=2.25.0",
-    # Add your package dependencies here
+    "jax==0.4.38",
+    "numpy",
+    "matplotlib",
+    "tqdm",
+    "exojax",
+    "scipy",
+    "marimo>=0.15.2",
 ]
 
 [project.optional-dependencies]
@@ -40,60 +42,17 @@ dev = [
     "pytest-cov>=2.0",
     "black>=21.0",
     "flake8>=3.8",
-    "mypy>=0.900"
+    "mypy>=0.900",
+    "ipython"
 ]
 docs = [
     "sphinx>=4.0",
     "sphinx-rtd-theme>=1.0"
 ]
 
-[project.urls]
-Homepage = "https://github.com/andycasey/luminare"
-Repository = "https://github.com/andycasey/luminare"
-Documentation = "https://luminare.readthedocs.io"
-"Bug Reports" = "https://github.com/andycasey/luminare/issues"
-Changelog = "https://github.com/andycasey/luminare/blob/main/CHANGELOG.md"
-
-[project.scripts]
-# Uncomment and modify if your package provides command-line scripts
-# your-cli-command = "your_package.module:main_function"
-
-[project.entry-points."console_scripts"]
-# Alternative way to define console scripts
-# your-cli-command = "your_package.module:main_function"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["luminare*"]
 
-[tool.setuptools.package-dir]
-"" = "src"
-
-# Optional: Configuration for development tools
-[tool.black]
-line-length = 88
-target-version = ['py38']
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-
-[tool.coverage.run]
-source = ["src"]
-omit = ["*/tests/*"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError"
-]
+[tool.uv]
+constraint-dependencies = ["llvm>0.43.0"]
