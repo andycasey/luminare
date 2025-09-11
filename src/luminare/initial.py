@@ -5,85 +5,62 @@ from jaxopt import ProjectedGradient, BoxCDQP
 from jaxopt.projection import projection_box
 
 import numpy as np
-from scipy.optimize import lsq_linear
-
-def solve_bounded_lstsq(
-    A, 
-    b, 
-    bounds_lower, 
-    bounds_upper, 
-    x0=None, 
-    maxiter=1000,
-    stepsize=1e-4,
-    maxls=50,
-    tol=1e-12,
-    **kwargs
-):
-    """
-    Solve bounded linear least squares: min ||Ax - b||^2 subject to bounds
-    Using BoxCDQP - closest analog to scipy's trf_linear algorithm
-    """
-        
-    if x0 is None:
-        x0 = jnp.zeros(A.shape[1])
-    
-    # Convert linear least squares to QP form: min 0.5 x^T Q x + c^T x
-    Q = A.T @ A
-    c = -A.T @ b
-    objective = lambda x: jnp.sum((A @ x - b)**2)
-    
-    # BoxCDQP is the closest to trf_linear - coordinate descent for box-constrained QP
-    kwds = dict(maxiter=maxiter, tol=tol)
-    kwds.update(kwargs)
-    solver = BoxCDQP(maxiter=1e3, tol=1e-2, verbose=1, implicit_diff=False)#jit=False, **kwds)
-    
-    result = solver.run(
-        x0,
-        params_obj=(Q, c),
-        params_ineq=(bounds_lower, bounds_upper),
-    )
-    print(objective(x0), objective(result.params))
-    raise a
-    return result
-
+from scipy.optimize._lsq.trf_linear import trf_linear
 
 
 def create_initial_estimator(H, A, large=jnp.inf):
 
-    use = jnp.any(A != 0, axis=1)
-
     A_full = jnp.hstack([H, A])
-    bounds = (
-        -large * jnp.ones(A_full.shape[1]),
-        jnp.hstack([jnp.zeros(H.shape[1]), +large * jnp.ones(A.shape[1])])
-    )
 
     def initial(flux, ivar):
-        ATCinv = (A_full[use] * ivar[use][:, None]).T
-        ATCinvA = ATCinv @ A_full[use]
-        ATCinvY = ATCinv @ flux[use]
+
+        bounds = (
+            -large * jnp.ones(A_full.shape[1]),
+            jnp.hstack([jnp.zeros(H.shape[1]), +large * jnp.ones(A.shape[1])])
+        )
+        use = jnp.any(A != 0, axis=1) * (ivar > 0)
+        Aw = (A_full * jnp.sqrt(ivar[:, None]))
+        Yw = flux * jnp.sqrt(ivar)
         
         # TODO: Would be good to have a jax version of this.
         f = partial(np.array, dtype=np.float64)
-        r = lsq_linear(*map(f, (ATCinvA, ATCinvY, bounds)))
+        x0 = jnp.linalg.lstsq(Aw, Yw, rcond=None)[0]
+        x0 = jnp.clip(x0, *bounds)
+        x0, Aw, Yw, (lb, ub) = map(f, (x0, Aw, Yw, bounds))
+        eps = np.finfo(float).eps
+        kwds = dict(tol=eps, lsmr_tol=eps, lsq_solver="exact", max_iter=10_000, verbose=0)
+
+        r = trf_linear(Aw[use], Yw[use], x_lsq=x0, lb=lb, ub=ub, **kwds)
 
         θ_c = r.x[-A.shape[1]:]
         continuum = A @ θ_c
-        
-        Y = 1 - flux / continuum
-        Cinv = ivar * continuum**2
-        bad = ~jnp.isfinite(Y) | (Cinv == 0)
-        Y = jnp.where(bad, 0.0, Y)
-        Cinv = jnp.where(bad, 0.0, Cinv)
-        HTCinv = (H * Cinv[:, None]).T
+
+        Hw = H * (jnp.sqrt(ivar) * continuum)[:, None]
+        Yw = (continuum - flux) * jnp.sqrt(ivar)
 
         # TODO: Would be good to have a jax version of this.
-        r = lsq_linear(
-            *map(f, (HTCinv @ H, HTCinv @ Y)), 
-            bounds=(0, jnp.inf)
-        )
+        lb, ub = (jnp.zeros(H.shape[1]), jnp.inf * jnp.ones(H.shape[1]))
+        x0 = jnp.clip(jnp.linalg.lstsq(Hw[use], Yw[use], rcond=None)[0], lb, ub)
+        x0, Hw, Yw = map(f, (x0, Hw, Yw))
+        r = trf_linear(Hw, Yw, x_lsq=x0, lb=lb, ub=ub, **kwds)
         θ_W = r.x
+
         rectified_flux = 1 - H @ θ_W
         return (θ_W, θ_c, rectified_flux, continuum)
         
     return initial
+
+
+#@partial(jax.jit, static_argnames=("index", "n", "max_vsini"))
+def estimate_vsini(model, flux, ivar, θ_initial, index, max_vsini=400, n=20):
+
+    @jax.jit
+    def trial_vsini(vsini):
+        θ = jnp.copy(θ_initial)
+        θ = θ.at[index].set(vsini)
+        return jnp.sum((model(θ) - flux)**2 * ivar)
+
+    vsinis = jnp.linspace(0, max_vsini, n)
+    chi2 = jax.vmap(trial_vsini)(vsinis)
+    vsini_best = vsinis[jnp.argmin(chi2)]
+    return (vsini_best, vsinis, chi2)
