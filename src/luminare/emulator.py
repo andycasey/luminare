@@ -10,6 +10,19 @@ from luminare.fourier import eval_at_point
 from luminare.scalers import periodic_scalers
 from luminare.utils import air_to_vacuum
 
+import equinox as eqx
+
+class StellarSpectrumModel(eqx.Module):
+    model: callable
+    n_parameters: int
+    label_names: Tuple[str, ...]
+    transform: callable
+    inverse_transform: callable
+
+    def __call__(self, θ):
+        return self.model(θ)
+    
+
 def create_stellar_spectrum_model(
     λ: jnp.array,
     H: jnp.ndarray,
@@ -99,7 +112,14 @@ def create_stellar_spectrum_model(
     inverse_transform = lambda x: jnp.hstack([inverse_transform_stellar_labels(x[:n]), x[n:]])
     n_parameters = n_flux_model_parameters + n_continuum_model_parameters
 
-    return (forward_model, n_parameters, stellar_label_names, transform, inverse_transform)
+    #return (forward_model, n_parameters, stellar_label_names, transform, inverse_transform)
+    return StellarSpectrumModel(
+        model=forward_model,
+        n_parameters=n_parameters,
+        label_names=stellar_label_names,
+        transform=transform,
+        inverse_transform=inverse_transform
+    )
     
 
 def basis_weights(
