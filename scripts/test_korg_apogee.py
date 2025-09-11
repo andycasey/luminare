@@ -1,4 +1,4 @@
-
+import sys
 import pickle
 import jax
 import jax.numpy as jnp
@@ -6,8 +6,11 @@ import optimistix
 from astropy.io import fits
 from time import time
 
+sys.path.insert(0, "../src/")
+
 from luminare.emulator import create_stellar_spectrum_model
 from luminare.continuum import create_design_matrix, initial_theta
+from luminare.initial import create_initial_estimator
 
 with open("2025-08-04-model.pkl", "rb") as fp:
     serialised_model = pickle.load(fp)
@@ -21,14 +24,30 @@ continuum_regions = (
     (16450.0, 16960.0),
 )
 continuum_n_modes = 9
+λ = 10**(4.179 + 6e-6 * jnp.arange(8575))
 
 model, n_parameters, label_names, transform, inverse_transform = create_stellar_spectrum_model(
+    λ=λ,
+    H=serialised_model["H"],
+    X=serialised_model["X"],
+    n_modes=serialised_model["n_modes"],
+    stellar_label_names=serialised_model["stellar_label_names"],
+    min_stellar_labels=jnp.array(serialised_model["min_stellar_labels"]),
+    max_stellar_labels=jnp.array(serialised_model["max_stellar_labels"]),
+    n_stellar_label_points=serialised_model["n_stellar_label_points"],
     spectral_resolution=22_500,
     continuum_regions=continuum_regions,
     continuum_n_modes=continuum_n_modes,
-    **serialised_model,
-
 )
+
+A = create_design_matrix(λ, continuum_regions, continuum_n_modes)
+
+H = serialised_model["H"].T
+
+f = create_initial_estimator(H, A)
+
+
+
 
 
 with fits.open("mwmStar-0.6.0-0.fits") as image:
@@ -38,10 +57,20 @@ with fits.open("mwmStar-0.6.0-0.fits") as image:
     ivar = image[hdu].data["ivar"][0]
 
 λ, flux, ivar = map(jnp.array, (λ, flux, ivar))
-inv_sigma = jnp.sqrt(ivar)
+
+θ_w, θ_c, rectified_flux, continuum = f(flux, ivar)
+
+# Now estimate stellar parameters from θ_w given a RF.
 
 
 
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+ax.plot(λ, flux, label="Flux")
+ax.plot(λ, rectified_flux * continuum, label="Initial model")
+ax.legend()
+fig.savefig("temp.png")
+raise a
 
 # Let us assume we have a reasonable initial guess for the stellar parameters.
 initial_parameters_dict = {
@@ -116,7 +145,7 @@ for i, ax in enumerate(axes.flat):
     ax.set_ylim(0.5, 1.1)
 
 fig.tight_layout()
-fig.savefig("tmp.png", dpi=300, bbox_inches="tight")
+fig.savefig("korg_apogee_solar.png", dpi=300, bbox_inches="tight")
 
 for k, v in dict(zip(label_names, inverse_transform(r.value))).items():
     print(f"{k}: {v:.2f}")
